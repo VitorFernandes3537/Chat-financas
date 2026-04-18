@@ -5,7 +5,7 @@ compatibility_date = "2024-01-01"
 # Variáveis de ambiente — substitua com seus valores reais
 # NUNCA comite a SUPABASE_KEY aqui. Use: wrangler secret put SUPABASE_KEY
 [vars]
-SUPABASE_URL = "https://ajsafogxhdlmswszhudo.supabase.co"
+SUPABASE_URL = "https://SEU_PROJECT_ID.supabase.co"
 ALLOWED_ORIGIN = "https://financa.pages.dev"
 
 # Segredos — execute no terminal:

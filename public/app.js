@@ -1,10 +1,10 @@
-// ─── CONFIG ────────────────────────────────────────────────────
+// ─── CONFIG ──────────────────────────────────────────────────
+// Só o workerUrl fica salvo — nenhuma chave de API no frontend
 let CFG = {
-  openaiKey: localStorage.getItem('openai_key') || '',
   workerUrl: localStorage.getItem('worker_url') || '',
 };
 
-// ─── TABS ──────────────────────────────────────────────────────
+// ─── TABS ─────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(btn => {
   btn.addEventListener('click', () => {
     const target = btn.dataset.tab;
@@ -16,21 +16,18 @@ document.querySelectorAll('.tab').forEach(btn => {
   });
 });
 
-// ─── SETTINGS ──────────────────────────────────────────────────
-document.getElementById('cfg-openai').value = CFG.openaiKey;
+// ─── SETTINGS ─────────────────────────────────────────────────
 document.getElementById('cfg-worker').value = CFG.workerUrl;
 
 document.getElementById('btn-save-settings').addEventListener('click', () => {
-  CFG.openaiKey = document.getElementById('cfg-openai').value.trim();
   CFG.workerUrl = document.getElementById('cfg-worker').value.trim().replace(/\/$/, '');
-  localStorage.setItem('openai_key', CFG.openaiKey);
   localStorage.setItem('worker_url', CFG.workerUrl);
   const msg = document.getElementById('settings-msg');
   msg.textContent = 'Salvo!';
   setTimeout(() => msg.textContent = '', 2000);
 });
 
-// ─── CHAT ──────────────────────────────────────────────────────
+// ─── CHAT ─────────────────────────────────────────────────────
 const messagesEl = document.getElementById('messages');
 
 function addMsg(text, role, tx) {
@@ -62,96 +59,51 @@ function removeTyping() { document.getElementById('typing')?.remove(); }
 
 addMsg('Oi! Me conta seus gastos, receitas ou dívidas. Ex: "gastei 45 reais no mercado" ou "recebi salário de 3000".', 'bot');
 
+// ─── PROCESS TEXT → WORKER ────────────────────────────────────
 async function processText(text) {
-  if (!CFG.openaiKey) {
-    addMsg('Configure sua chave OpenAI na aba Config primeiro.', 'bot');
+  if (!CFG.workerUrl) {
+    addMsg('Configure a URL do Worker na aba Config primeiro.', 'bot');
     return;
   }
 
   addMsg(text, 'user');
   addTyping();
 
-  const prompt = `Você é um assistente financeiro pessoal brasileiro. Analise esta mensagem e extraia informações financeiras.
-
-Mensagem: "${text}"
-
-Responda APENAS com JSON válido neste formato exato (sem markdown, sem texto fora do JSON):
-{
-  "entendeu": true,
-  "tipo": "gasto",
-  "valor": 45.00,
-  "categoria": "alimentação",
-  "descricao": "mercado",
-  "resposta": "Registrado! Gasto de R$ 45,00 no mercado."
-}
-
-Tipos: "gasto", "receita", "divida"
-Categorias para gasto: alimentação, transporte, moradia, saúde, lazer, educação, assinatura, outros
-Categorias para receita: salário, freelance, investimento, outros  
-Categorias para dívida: cartão, empréstimo, parcela, outros
-
-Se não conseguir extrair, responda: {"entendeu": false, "resposta": "Não entendi. Tente: 'gastei 50 no uber'"}`;
-
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    // Toda a lógica de IA e banco fica no Worker
+    const res = await fetch(`${CFG.workerUrl}/process`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CFG.openaiKey}` },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        max_tokens: 300,
-        temperature: 0,
-        messages: [{ role: 'user', content: prompt }]
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
     });
 
-    const data = await res.json();
+    const parsed = await res.json();
     removeTyping();
 
-    if (data.error) { addMsg('Erro OpenAI: ' + data.error.message, 'bot'); return; }
-
-    const raw = data.choices[0].message.content.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(raw);
-
-    if (!parsed.entendeu) { addMsg(parsed.resposta, 'bot'); return; }
-
-    // Save to Worker / Supabase
-    const tx = { tipo: parsed.tipo, valor: parsed.valor, categoria: parsed.categoria, descricao: parsed.descricao };
-
-    if (CFG.workerUrl) {
-      try {
-        await fetch(`${CFG.workerUrl}/tx`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(tx)
-        });
-      } catch (_) {
-        // Worker offline — salva localmente
-        saveLocal(tx);
-      }
-    } else {
-      saveLocal(tx);
+    if (!res.ok) {
+      addMsg('Erro: ' + (parsed.error || 'Tente novamente.'), 'bot');
+      return;
     }
 
-    addMsg(parsed.resposta, 'bot', tx);
+    if (!parsed.entendeu) {
+      addMsg(parsed.resposta, 'bot');
+      return;
+    }
+
+    addMsg(parsed.resposta, 'bot', {
+      tipo: parsed.tipo,
+      valor: parsed.valor,
+      categoria: parsed.categoria,
+    });
 
   } catch (err) {
     removeTyping();
-    addMsg('Erro ao processar. Verifique sua conexão e chave.', 'bot');
+    addMsg('Erro de conexão com o Worker. Verifique a URL nas configurações.', 'bot');
     console.error(err);
   }
 }
 
-// ─── LOCAL FALLBACK ────────────────────────────────────────────
-function saveLocal(tx) {
-  const list = JSON.parse(localStorage.getItem('tx_local') || '[]');
-  list.push({ ...tx, created_at: new Date().toISOString() });
-  localStorage.setItem('tx_local', JSON.stringify(list));
-}
-function getLocal() {
-  return JSON.parse(localStorage.getItem('tx_local') || '[]');
-}
-
-// ─── SEND / INPUT ─────────────────────────────────────────────
+// ─── INPUT ────────────────────────────────────────────────────
 const input = document.getElementById('user-input');
 input.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -170,7 +122,7 @@ function send() {
   processText(text);
 }
 
-// ─── AUDIO ────────────────────────────────────────────────────
+// ─── ÁUDIO ────────────────────────────────────────────────────
 let isRec = false, recorder = null, chunks = [];
 const recBtn = document.getElementById('rec-btn');
 
@@ -183,12 +135,11 @@ recBtn.addEventListener('click', async () => {
       recorder.ondataavailable = e => chunks.push(e.data);
       recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
-        await transcribe(new Blob(chunks, { type: 'audio/webm' }));
+        await transcribeViaWorker(new Blob(chunks, { type: 'audio/webm' }));
       };
       recorder.start();
       isRec = true;
       recBtn.classList.add('recording');
-      recBtn.title = 'Parar';
     } catch {
       addMsg('Microfone não disponível. Use o campo de texto.', 'bot');
     }
@@ -196,34 +147,41 @@ recBtn.addEventListener('click', async () => {
     recorder.stop();
     isRec = false;
     recBtn.classList.remove('recording');
-    recBtn.title = 'Gravar';
   }
 });
 
-async function transcribe(blob) {
-  if (!CFG.openaiKey) { addMsg('Configure a chave OpenAI primeiro.', 'bot'); return; }
+async function transcribeViaWorker(blob) {
+  if (!CFG.workerUrl) { addMsg('Configure a URL do Worker.', 'bot'); return; }
+
   addTyping();
-  try {
-    const fd = new FormData();
-    fd.append('file', blob, 'audio.webm');
-    fd.append('model', 'whisper-1');
-    fd.append('language', 'pt');
-    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${CFG.openaiKey}` },
-      body: fd
-    });
-    const data = await res.json();
-    removeTyping();
-    if (data.text) processText(data.text);
-    else addMsg('Não consegui transcrever. Tente novamente.', 'bot');
-  } catch {
-    removeTyping();
-    addMsg('Erro na transcrição.', 'bot');
-  }
+
+  // Converte blob para base64 para enviar ao Worker
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const base64 = reader.result.split(',')[1];
+
+    try {
+      const res = await fetch(`${CFG.workerUrl}/transcribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio: base64, mimeType: blob.type }),
+      });
+
+      const data = await res.json();
+      removeTyping();
+
+      if (data.error) { addMsg('Erro na transcrição: ' + data.error, 'bot'); return; }
+      if (data.text) processText(data.text);
+
+    } catch {
+      removeTyping();
+      addMsg('Erro ao transcrever áudio.', 'bot');
+    }
+  };
+  reader.readAsDataURL(blob);
 }
 
-// ─── REPORT ───────────────────────────────────────────────────
+// ─── RELATÓRIO ────────────────────────────────────────────────
 function initReport() {
   const sel = document.getElementById('filter-month');
   if (sel.options.length === 0) {
@@ -246,45 +204,41 @@ async function loadReport() {
   const month = document.getElementById('filter-month').value;
   const tipo = document.getElementById('filter-tipo').value;
   const content = document.getElementById('report-content');
+
+  if (!CFG.workerUrl) {
+    content.innerHTML = '<div class="empty-state">Configure a URL do Worker nas configurações.</div>';
+    return;
+  }
+
   content.innerHTML = '<div class="empty-state">Carregando...</div>';
 
-  let txList = [];
+  try {
+    const params = new URLSearchParams({ month });
+    if (tipo) params.set('tipo', tipo);
 
-  if (CFG.workerUrl) {
-    try {
-      const params = new URLSearchParams({ month });
-      if (tipo) params.set('tipo', tipo);
-      const res = await fetch(`${CFG.workerUrl}/report?${params}`);
-      const data = await res.json();
-      txList = data.transactions || [];
-    } catch {
-      txList = getLocal();
+    const res = await fetch(`${CFG.workerUrl}/report?${params}`);
+    const data = await res.json();
+
+    if (!res.ok) {
+      content.innerHTML = `<div class="empty-state">Erro: ${data.error}</div>`;
+      return;
     }
-  } else {
-    txList = getLocal();
-  }
 
-  // filter by month if local
-  if (!CFG.workerUrl) {
-    txList = txList.filter(t => t.created_at?.startsWith(month));
-    if (tipo) txList = txList.filter(t => t.tipo === tipo);
-  }
+    renderReport(data.transactions || [], data.totals, content);
 
-  renderReport(txList, content);
+  } catch {
+    content.innerHTML = '<div class="empty-state">Erro de conexão.</div>';
+  }
 }
 
-function renderReport(txList, container) {
+function renderReport(txList, totals, container) {
   if (!txList.length) {
     container.innerHTML = '<div class="empty-state">Nenhuma transação neste período.</div>';
     return;
   }
 
-  const receitas = txList.filter(t => t.tipo === 'receita').reduce((a, t) => a + Number(t.valor), 0);
-  const gastos = txList.filter(t => t.tipo === 'gasto').reduce((a, t) => a + Number(t.valor), 0);
-  const dividas = txList.filter(t => t.tipo === 'divida').reduce((a, t) => a + Number(t.valor), 0);
-  const saldo = receitas - gastos;
+  const { receitas = 0, gastos = 0, dividas = 0, saldo = 0 } = totals || {};
 
-  // Categorias
   const cats = {};
   txList.filter(t => t.tipo === 'gasto').forEach(t => {
     cats[t.categoria] = (cats[t.categoria] || 0) + Number(t.valor);
@@ -293,32 +247,32 @@ function renderReport(txList, container) {
 
   container.innerHTML = '';
 
-  // Summary cards
+  // Cards de totais
   const grid = document.createElement('div');
   grid.className = 'summary-grid';
   grid.innerHTML = `
-    <div class="stat-card"><div class="stat-label">Receitas</div><div class="stat-value pos">R$ ${receitas.toFixed(2)}</div></div>
-    <div class="stat-card"><div class="stat-label">Gastos</div><div class="stat-value neg">R$ ${gastos.toFixed(2)}</div></div>
-    <div class="stat-card"><div class="stat-label">Saldo</div><div class="stat-value ${saldo >= 0 ? 'pos' : 'neg'}">R$ ${saldo.toFixed(2)}</div></div>
+    <div class="stat-card"><div class="stat-label">Receitas</div><div class="stat-value pos">R$ ${Number(receitas).toFixed(2)}</div></div>
+    <div class="stat-card"><div class="stat-label">Gastos</div><div class="stat-value neg">R$ ${Number(gastos).toFixed(2)}</div></div>
+    <div class="stat-card"><div class="stat-label">Saldo</div><div class="stat-value ${saldo >= 0 ? 'pos' : 'neg'}">R$ ${Number(saldo).toFixed(2)}</div></div>
   `;
   container.appendChild(grid);
 
   if (dividas > 0) {
     const dc = document.createElement('div');
     dc.className = 'stat-card';
-    dc.innerHTML = `<div class="stat-label">Total em dívidas</div><div class="stat-value warn">R$ ${dividas.toFixed(2)}</div>`;
+    dc.innerHTML = `<div class="stat-label">Dívidas</div><div class="stat-value warn">R$ ${Number(dividas).toFixed(2)}</div>`;
     container.appendChild(dc);
   }
 
-  // Categories
+  // Barras por categoria
   if (Object.keys(cats).length) {
     const h = document.createElement('div');
     h.className = 'section-heading';
     h.textContent = 'Gastos por categoria';
     container.appendChild(h);
 
-    const catWrap = document.createElement('div');
-    catWrap.style.cssText = 'display:flex;flex-direction:column;gap:10px;';
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-direction:column;gap:10px;';
     Object.entries(cats).sort((a, b) => b[1] - a[1]).forEach(([cat, val]) => {
       const item = document.createElement('div');
       item.className = 'cat-bar-item';
@@ -326,26 +280,29 @@ function renderReport(txList, container) {
         <div class="cat-bar-header"><span>${cat}</span><span style="color:var(--red)">R$ ${val.toFixed(2)}</span></div>
         <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${(val / maxCat * 100).toFixed(1)}%"></div></div>
       `;
-      catWrap.appendChild(item);
+      wrap.appendChild(item);
     });
-    container.appendChild(catWrap);
+    container.appendChild(wrap);
   }
 
-  // Transaction list
+  // Lista de transações
   const h2 = document.createElement('div');
   h2.className = 'section-heading';
-  h2.textContent = 'Todas as transações';
+  h2.textContent = 'Transações';
   container.appendChild(h2);
 
   const listWrap = document.createElement('div');
-  [...txList].reverse().forEach(t => {
+  [...txList].forEach(t => {
     const colorClass = t.tipo === 'receita' ? 'pos' : t.tipo === 'divida' ? 'warn' : 'neg';
     const prefix = t.tipo === 'receita' ? '+' : '-';
     const date = t.created_at ? new Date(t.created_at).toLocaleDateString('pt-BR') : '';
     const item = document.createElement('div');
     item.className = 'tx-item';
     item.innerHTML = `
-      <div><div class="tx-desc">${t.descricao}</div><div class="tx-meta">${date} • ${t.categoria}</div></div>
+      <div>
+        <div class="tx-desc">${t.descricao}</div>
+        <div class="tx-meta">${date} • ${t.categoria}</div>
+      </div>
       <div class="tx-amount ${colorClass}">${prefix} R$ ${Number(t.valor).toFixed(2)}</div>
     `;
     listWrap.appendChild(item);
@@ -353,7 +310,7 @@ function renderReport(txList, container) {
   container.appendChild(listWrap);
 }
 
-// ─── SERVICE WORKER REGISTRATION ──────────────────────────────
+// ─── SERVICE WORKER ───────────────────────────────────────────
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(console.error);
