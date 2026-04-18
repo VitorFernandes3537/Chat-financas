@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f0f0f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Finanças" />
+  <title>Finanças Pessoais</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="header">
+      <h1>Finanças</h1>
+      <div id="tabs">
+        <button class="tab active" data-tab="chat">Chat</button>
+        <button class="tab" data-tab="report">Relatório</button>
+        <button class="tab" data-tab="settings">Config</button>
+      </div>
+    </header>
+
+    <!-- CHAT TAB -->
+    <section id="tab-chat" class="tab-content active">
+      <div id="messages"></div>
+      <div id="input-area">
+        <button id="rec-btn" aria-label="Gravar áudio">&#9679;</button>
+        <textarea id="user-input" placeholder="Ex: gastei 50 reais no uber..." rows="1"></textarea>
+        <button id="send-btn">Enviar</button>
+      </div>
+    </section>
+
+    <!-- REPORT TAB -->
+    <section id="tab-report" class="tab-content">
+      <div id="report-filters">
+        <select id="filter-month"></select>
+        <select id="filter-tipo">
+          <option value="">Todos</option>
+          <option value="gasto">Gastos</option>
+          <option value="receita">Receitas</option>
+          <option value="divida">Dívidas</option>
+        </select>
+        <button id="btn-load-report">Buscar</button>
+      </div>
+      <div id="report-content"></div>
+    </section>
+
+    <!-- SETTINGS TAB -->
+    <section id="tab-settings" class="tab-content">
+      <div class="settings-form">
+        <h2>Configurações</h2>
+
+        <label>Chave OpenAI (para transcrição e IA)</label>
+        <input type="password" id="cfg-openai" placeholder="sk-..." />
+
+        <label>URL do Worker (Cloudflare)</label>
+        <input type="text" id="cfg-worker" placeholder="https://financa.SEU-USUARIO.workers.dev" />
+
+        <button id="btn-save-settings">Salvar configurações</button>
+        <p id="settings-msg"></p>
+      </div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
