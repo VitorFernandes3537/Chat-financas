@@ -12,7 +12,7 @@
 
 const cors = (env) => ({
   'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || '*',
-  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 });
 
@@ -60,7 +60,7 @@ Se não entender: {"entendeu":false,"resposta":"Não entendi. Tente: 'gastei 50 
       }
 
       if (parsed.entendeu) {
-        const sbRes = await supabase(env, 'POST', '/rest/v1/transactions', {
+        const sbRes = await supabase(env, 'POST', '/rest/v1/transactions_app_financa', {
           tipo: parsed.tipo, valor: Number(parsed.valor),
           categoria: parsed.categoria, descricao: parsed.descricao || parsed.categoria,
         });
@@ -101,7 +101,7 @@ Se não entender: {"entendeu":false,"resposta":"Não entendi. Tente: 'gastei 50 
       const month = url.searchParams.get('month');
       const tipo = url.searchParams.get('tipo');
 
-      let query = '/rest/v1/transactions?select=*&order=created_at.desc';
+      let query = '/rest/v1/transactions_app_financa?select=*&order=created_at.desc';
 
       if (month) {
         const [year, m] = month.split('-');
@@ -128,10 +128,56 @@ Se não entender: {"entendeu":false,"resposta":"Não entendi. Tente: 'gastei 50 
       return new Response(JSON.stringify({ transactions, totals, byCategory }), { headers });
     }
 
+    // ── GET /stats ────────────────────────────────────────────
+    // Retorna totais mensais dos últimos N meses para o gráfico de tendência
+    if (url.pathname === '/stats' && request.method === 'GET') {
+      const months = Math.min(parseInt(url.searchParams.get('months') || '6'), 12);
+      const now = new Date();
+      const results = [];
+
+      for (let i = months - 1; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const year = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const lastDay = new Date(year, d.getMonth() + 1, 0).getDate();
+        const from = `${year}-${m}-01T00:00:00`;
+        const to   = `${year}-${m}-${String(lastDay).padStart(2,'0')}T23:59:59`;
+
+        const res = await supabase(env, 'GET',
+          `/rest/v1/transactions_app_financa?select=tipo,valor&created_at=gte.${from}&created_at=lte.${to}`
+        );
+        if (!res.ok) continue;
+
+        const rows = await res.json();
+        const gastos   = rows.filter(r => r.tipo === 'gasto').reduce((a, r) => a + Number(r.valor), 0);
+        const receitas = rows.filter(r => r.tipo === 'receita').reduce((a, r) => a + Number(r.valor), 0);
+        results.push({ month: `${year}-${m}`, gastos, receitas });
+      }
+
+      return new Response(JSON.stringify({ months: results }), { headers });
+    }
+
+    // ── PATCH /tx/:id ─────────────────────────────────────────
+    // Editar tipo, valor, categoria e descrição de uma transação
+    if (url.pathname.startsWith('/tx/') && request.method === 'PATCH') {
+      const id = url.pathname.split('/')[2];
+      const body = await request.json();
+      const allowed = ['tipo', 'valor', 'categoria', 'descricao'];
+      const patch = {};
+      allowed.forEach(k => { if (body[k] !== undefined) patch[k] = body[k]; });
+      if (patch.valor !== undefined) patch.valor = Number(patch.valor);
+      if (!Object.keys(patch).length) {
+        return new Response(JSON.stringify({ error: 'Nenhum campo para atualizar' }), { status: 400, headers });
+      }
+      const res = await supabase(env, 'PATCH', `/rest/v1/transactions_app_financa?id=eq.${id}`, patch);
+      if (!res.ok) return new Response(JSON.stringify({ error: 'Erro ao atualizar' }), { status: 500, headers });
+      return new Response(JSON.stringify({ ok: true }), { headers });
+    }
+
     // ── DELETE /tx/:id ────────────────────────────────────────
     if (url.pathname.startsWith('/tx/') && request.method === 'DELETE') {
       const id = url.pathname.split('/')[2];
-      const res = await supabase(env, 'DELETE', `/rest/v1/transactions?id=eq.${id}`);
+      const res = await supabase(env, 'DELETE', `/rest/v1/transactions_app_financa?id=eq.${id}`);
       if (!res.ok) return new Response(JSON.stringify({ error: 'Erro ao deletar' }), { status: 500, headers });
       return new Response(JSON.stringify({ ok: true }), { headers });
     }
@@ -147,7 +193,7 @@ function supabase(env, method, path, body) {
       'apikey': env.SUPABASE_KEY,
       'Authorization': `Bearer ${env.SUPABASE_KEY}`,
       'Content-Type': 'application/json',
-      'Prefer': method === 'POST' ? 'return=minimal' : '',
+      'Prefer': (method === 'POST' || method === 'PATCH') ? 'return=minimal' : '',
     },
   };
   if (body) opts.body = JSON.stringify(body);

@@ -1,4 +1,4 @@
-const CACHE = 'financa-v1';
+const CACHE = 'financa-v2';
 const STATIC = ['/', '/index.html', '/app.js', '/style.css', '/manifest.json'];
 
 self.addEventListener('install', e => {
@@ -14,11 +14,11 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // API calls: network only
-  if (e.request.url.includes('openai.com') || e.request.url.includes('workers.dev')) {
+  // Chamadas ao Worker e APIs externas: sempre rede
+  if (e.request.url.includes('workers.dev') || e.request.url.includes('openai.com')) {
     return;
   }
-  // Static assets: cache first
+  // Estáticos: cache first, fallback para rede
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request))
   );

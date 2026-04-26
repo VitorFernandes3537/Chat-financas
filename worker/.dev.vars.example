@@ -1,0 +1,5 @@
+# Copie este arquivo para .dev.vars e preencha com suas chaves reais
+# .dev.vars NUNCA vai para o git (já está no .gitignore)
+
+SUPABASE_KEY=sua_service_role_key_aqui
+OPENAI_KEY=sk-proj-...
